@@ -153,20 +153,32 @@ impl Transport {
         buff.write_u16::<BigEndian>(addr)?;
         buff.write_u16::<BigEndian>(count)?;
 
-        match self.stream.write_all(&buff) {
-            Ok(_s) => {
-                let mut reply = vec![0; MODBUS_HEADER_SIZE + expected_bytes + 2];
-                match self.stream.read_exact(&mut reply) {
-                    Ok(_s) => {
-                        let resp_hd = Header::unpack(&reply[..MODBUS_HEADER_SIZE])?;
-                        Transport::validate_response_header(&header, &resp_hd)?;
-                        Transport::validate_response_code(&buff, &reply)?;
-                        Transport::get_reply_data(&reply, expected_bytes)
+        self.stream.write_all(&buff)?;
+        let mut latest_err = None;
+        loop {
+            let mut reply = vec![0; MODBUS_HEADER_SIZE + expected_bytes + 2];
+            match self.stream.read_exact(&mut reply) {
+                Ok(_) => {
+                    let resp_hd = Header::unpack(&reply[..MODBUS_HEADER_SIZE])?;
+                    match Transport::validate_response_header(&header, &resp_hd) {
+                        Ok(_) => {
+                            Transport::validate_response_code(&buff, &reply)?;
+                            return Transport::get_reply_data(&reply, expected_bytes);
+                        }
+                        Err(e) => {
+                            // Discard invalid TIDs and retry read
+                            latest_err = Some(e);
+                            continue;
+                        }
                     }
-                    Err(e) => Err(Error::Io(e)),
                 }
-            }
-            Err(e) => Err(Error::Io(e)),
+                Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
+                    return Err(latest_err.map_or_else(|| Error::Io(e), |e| e.into()));
+                }
+                Err(e) => {
+                    return Err(Error::Io(e));
+                }
+            };
         }
     }
 
