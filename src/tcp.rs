@@ -155,7 +155,8 @@ impl Transport {
 
         self.stream.write_all(&buff)?;
         let mut latest_err = None;
-        loop {
+        // Some devices have caches for old values, so discard invalid TIDs and retry read
+        for _ in 0..2 {
             let mut reply = vec![0; MODBUS_HEADER_SIZE + expected_bytes + 2];
             match self.stream.read_exact(&mut reply) {
                 Ok(_) => {
@@ -168,7 +169,6 @@ impl Transport {
                         Err(e) => {
                             // Discard invalid TIDs and retry read
                             latest_err = Some(e);
-                            continue;
                         }
                     }
                 }
@@ -180,6 +180,7 @@ impl Transport {
                 }
             };
         }
+        Err(latest_err.unwrap().into())
     }
 
     fn validate_response_header(req: &Header, resp: &Header) -> Result<()> {
