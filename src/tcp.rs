@@ -551,4 +551,51 @@ mod tests {
         CLOSED.store(true, Ordering::Relaxed);
         jh.join().unwrap();
     }
+    #[test]
+    fn read_retries_on_invalid_tid() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut req = [0u8; 12];
+            stream.read_exact(&mut req).unwrap();
+
+            let req_header = Header::unpack(&req[..MODBUS_HEADER_SIZE]).unwrap();
+            let expected_bytes = 1u8;
+            let len = 1u16 + 1u16 + 1u16 + expected_bytes as u16;
+
+            let make_reply = |tid: u16, data: u8| {
+                let header = Header {
+                    tid,
+                    pid: MODBUS_PROTOCOL_TCP,
+                    len,
+                    uid: req_header.uid,
+                };
+                let mut reply = header.pack().unwrap();
+                reply.push(req[7]);
+                reply.push(expected_bytes);
+                reply.push(data);
+                reply
+            };
+
+            let old_reply = make_reply(req_header.tid.wrapping_sub(1), 0x00);
+            stream.write_all(&old_reply).unwrap();
+
+            let valid_reply = make_reply(req_header.tid, 0x01);
+            stream.write_all(&valid_reply).unwrap();
+        });
+
+        let stream = TcpStream::connect(addr).unwrap();
+        let mut transport = Transport {
+            tid: 0,
+            uid: 1,
+            stream,
+        };
+
+        let bytes = transport.read(&Function::ReadCoils(0, 1)).unwrap();
+        assert_eq!(bytes, vec![0x01]);
+
+        server.join().unwrap();
+    }
 }
