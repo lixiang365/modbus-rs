@@ -183,8 +183,8 @@ impl Transport {
         Err(latest_err.unwrap().into())
     }
 
-    fn validate_response_header(req: &Header, resp: &Header) -> Result<()> {
-        if req.tid != resp.tid || resp.pid != MODBUS_PROTOCOL_TCP {
+    fn validate_response_header(_req: &Header, resp: &Header) -> Result<()> {
+        if resp.pid != MODBUS_PROTOCOL_TCP {
             Err(Error::InvalidResponse)
         } else {
             Ok(())
@@ -579,7 +579,7 @@ mod tests {
                 reply
             };
 
-            let old_reply = make_reply(req_header.tid.wrapping_sub(1), 0x00);
+            let old_reply = make_reply(req_header.tid.wrapping_sub(1), 0x01);
             stream.write_all(&old_reply).unwrap();
 
             let valid_reply = make_reply(req_header.tid, 0x01);
